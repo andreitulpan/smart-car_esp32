@@ -3,16 +3,35 @@
 #include "OTA/OTAHandler.hpp"
 #include "BLE/BLEHandler.hpp"
 #include "EEPROM/EEPROMHandler.hpp"
+#include "Firebase/FirebaseHandler.hpp"
 
 #define BOOT_BUTTON_PIN 0 // GPIO pin for the boot button
 #define LED_PIN 2         // GPIO pin for the onboard LED
 
 bool isBLEActive = false; // Tracks if BLE is active
 bool wifiStatus = false;
+bool firebaseStatus = false;
+
+// NTP server
+const char* ntpServer = "pool.ntp.org";
 
 // OTAHandler otaHandler;
 BLEHandler bleHandler;
 EEPROMHandler eepromHandler(EEPROM_SIZE);
+
+// Firebase handler instance
+FirebaseHandler firebaseHandler(API_KEY, USER_EMAIL, USER_PASSWORD, DATABASE_URL);
+
+// Function to get the current epoch time
+unsigned long getTime() {
+    time_t now;
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo)) {
+        return 0;
+    }
+    time(&now);
+    return now;
+}
 
 void bleReceiveCallback(const std::string& message) {
     if (!message.empty()) {
@@ -59,6 +78,24 @@ void bleReceiveCallback(const std::string& message) {
     }
 }
 
+void sendMockFirebaseData()
+{
+    // Simulate sensor readings
+    float temp = random(1500, 3000) / 100.0;    // Simulate temperature between 15.00°C and 30.00°C
+    float humidity = random(3000, 8000) / 100.0; // Simulate humidity between 30.00% and 80.00%
+    float pressure = random(99000, 105000) / 100.0; // Simulate pressure between 990.00 and 1050.00 hPa
+
+    // Get current timestamp
+    unsigned long timestamp = getTime();
+    if (timestamp == 0) {
+        Serial.println("Failed to obtain time");
+        return;
+    }
+
+    // Send data to Firebase
+    firebaseHandler.sendData(temp, humidity, pressure, timestamp);
+}
+
 void setup() {
     Serial.begin(115200);
 
@@ -96,11 +133,26 @@ void loop() {
     static unsigned long lastLEDToggleTime = 0;
     static bool ledState = false;
 
-    if (WiFi.status() == WL_CONNECTED && !wifiStatus) {
-        wifiStatus = true;
-        Serial.println("\nConnected to WiFi network " + String(WiFi.SSID()));
-        Serial.println("IP Address: " + WiFi.localIP().toString());
-        bleHandler.sendMessage(std::string("WiFi connected: ") + WiFi.SSID().c_str() + ", IP: " + WiFi.localIP().toString().c_str());
+    if (WiFi.status() == WL_CONNECTED) {
+        if (!wifiStatus) {
+            wifiStatus = true;
+            Serial.println("\nConnected to WiFi network " + String(WiFi.SSID()));
+            Serial.println("IP Address: " + WiFi.localIP().toString());
+            bleHandler.sendMessage(std::string("WiFi connected: ") + WiFi.SSID().c_str() + ", IP: " + WiFi.localIP().toString().c_str());
+            
+            // Configure time
+            configTime(0, 0, ntpServer);
+        }
+
+        if (!firebaseStatus) {
+            firebaseHandler.begin();
+            firebaseStatus = true;
+        }
+
+        // Send mock Firebase data
+        if (WiFi.status() == WL_CONNECTED) {
+            sendMockFirebaseData();
+        }
     }
 
     // Check if the boot button is pressed
