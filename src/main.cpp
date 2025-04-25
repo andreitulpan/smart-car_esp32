@@ -113,8 +113,15 @@ void setup() {
 
     // Initialize CAN
     if (!canHandler.begin()) {
-        while (1); // Halt if CAN initialization fails
+        Serial.println("CAN initialization failed!");
     }
+
+    // Add PIDs to the CAN handler
+    canHandler.addPID(0x0C, "RPM");
+    canHandler.addPID(0x0D, "Speed");
+    canHandler.addPID(0x10, "MAF");
+    canHandler.addPID(0x05, "Coolant Temp");
+    canHandler.addPID(0x5C, "Oil Temp");
 
     String ssid, password;
     eepromHandler.loadWiFiCredentials(ssid, password); // Load WiFi credentials from EEPROM
@@ -197,14 +204,14 @@ void loop() {
     // Handle BLE communication
     bleHandler.handle();
 
-    // Handle CAN communication
-    if (millis() - lastCANRequestTime >= 3000 || lastCANRequestTime == 0) {
-        lastCANRequestTime = millis();
+    // Send CAN requests every 5 seconds
+    canHandler.sendRequests();
 
-        canHandler.requestAndReceive(0x0C, "RPM");          // Request Engine RPM
-        canHandler.requestAndReceive(0x0D, "Speed");        // Request Vehicle Speed
-        canHandler.requestAndReceive(0x10, "MAF");          // Request Mass Air Flow
-        canHandler.requestAndReceive(0x05, "Coolant Temp"); // Request Coolant Temperature
-        canHandler.requestAndReceive(0x5C, "Oil Temp");     // Request Oil Temperature
+    // Handle incoming CAN responses
+    auto [pid, rxBuf] = canHandler.handleResponse();
+    if (pid != 0xFF && rxBuf != nullptr) {
+        String label = canHandler.getLabelForPID(pid);
+        String humanReadable = canHandler.convertToHumanReadable(pid, rxBuf);
+        Serial.println("Received Response: " + label + " -> " + humanReadable);
     }
 }

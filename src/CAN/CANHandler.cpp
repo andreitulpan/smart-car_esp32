@@ -13,51 +13,91 @@ bool CANHandler::begin() {
     }
 }
 
-void CANHandler::requestAndReceive(byte pid, const String& label) {
-    byte request[] = {0x02, 0x01, pid, 0x00, 0x00, 0x00, 0x00, 0x00};
-    can.sendMsgBuf(obdRequestId, 0, 8, request);
-    delay(100); // Give ECU time to respond
+void CANHandler::addPID(byte pid, const String& label) {
+    pidMap[pid] = label;
+    lastRequestTime[pid] = 0; // Initialize the last request time for the PID
+    lastResponseTime[pid] = 0; // Initialize the last response time for the PID
+    responseReceived[pid] = true; // Assume a response has been received initially
+}
 
+void CANHandler::sendRequests() {
+    unsigned long currentTime = millis();
+
+    for (const auto& entry : pidMap) {
+        byte pid = entry.first;
+
+        // Check if it's time to send a request for this PID
+        if (currentTime - lastRequestTime[pid] >= requestInterval && responseReceived[pid]) {
+            byte request[] = {0x02, 0x01, pid, 0x00, 0x00, 0x00, 0x00, 0x00};
+            if (can.sendMsgBuf(obdRequestId, 0, 8, request) == CAN_OK) {
+                Serial.println("Request sent for PID: " + String(pid, HEX) + " (" + pidMap[pid] + ")");
+                lastRequestTime[pid] = currentTime; // Update the last request time
+                responseReceived[pid] = false; // Mark as waiting for a response
+            } else {
+                Serial.println("Error sending request for PID: " + String(pid, HEX));
+            }
+        }
+
+        // Check if the response threshold has been exceeded
+        if (!responseReceived[pid] && currentTime - lastResponseTime[pid] >= responseThreshold) {
+            Serial.println("No response received for PID: " + String(pid, HEX) + " (" + pidMap[pid] + ") within threshold time.");
+            responseReceived[pid] = true; // Allow sending the request again
+        }
+    }
+}
+
+std::tuple<byte, byte*> CANHandler::handleResponse() {
     unsigned long rxId;
     byte len;
-    byte rxBuf[8];
+    static byte rxBuf[8]; // Static to persist after function returns
 
-    unsigned long startTime = millis();
-    while (millis() - startTime < 500) { // Wait for response for 500ms
-        if (can.checkReceive() == CAN_MSGAVAIL) {
-            can.readMsgBuf(&rxId, &len, rxBuf);
+    // Check for incoming CAN messages
+    if (can.checkReceive() == CAN_MSGAVAIL) {
+        can.readMsgBuf(&rxId, &len, rxBuf);
 
-            if (rxId == ecuResponseId && rxBuf[1] == 0x41 && rxBuf[2] == pid) {
-                parseOBDResponse(rxBuf, label);
-                return;
+        // Check if the message is a response from the ECU
+        if (rxId == ecuResponseId && len >= 3 && rxBuf[1] == 0x41) {
+            byte pid = rxBuf[2]; // Extract the PID from the response
+            if (pidMap.find(pid) != pidMap.end()) {
+                // Update the last response time for the PID
+                lastResponseTime[pid] = millis();
+                responseReceived[pid] = true; // Mark as response received
+                return std::make_tuple(pid, rxBuf); // Return PID and raw message
             }
         }
     }
-
-    Serial.println(label + ": No Response");
+    return std::make_tuple(0xFF, nullptr); // Return invalid PID if no valid response
 }
 
-void CANHandler::parseOBDResponse(byte* rxBuf, const String& label) {
-    int value = 0;
+String CANHandler::convertToHumanReadable(byte pid, byte* rxBuf) {
+    if (!rxBuf) return "No Data";
 
+    int value = 0;
+    if (pidMap.find(pid) == pidMap.end()) return "Unknown PID";
+
+    String label = pidMap[pid];
     if (label == "RPM") {
         value = ((rxBuf[3] * 256) + rxBuf[4]) / 4;
-        Serial.println("RPM: " + String(value));
-    } 
-    else if (label == "Speed") {
+        return "RPM: " + String(value);
+    } else if (label == "Speed") {
         value = rxBuf[3];
-        Serial.println("Speed: " + String(value) + " km/h");
-    } 
-    else if (label == "Coolant Temp") {
+        return "Speed: " + String(value) + " km/h";
+    } else if (label == "Coolant Temp") {
         value = rxBuf[3] - 40;
-        Serial.println("Coolant Temp: " + String(value) + " °C");
-    } 
-    else if (label == "Oil Temp") {
+        return "Coolant Temp: " + String(value) + " °C";
+    } else if (label == "Oil Temp") {
         value = rxBuf[3] - 40;
-        Serial.println("Oil Temp: " + String(value) + " °C");
-    } 
-    else if (label == "MAF") {
+        return "Oil Temp: " + String(value) + " °C";
+    } else if (label == "MAF") {
         float maf = ((rxBuf[3] * 256) + rxBuf[4]) / 100.0;
-        Serial.println("MAF: " + String(maf) + " g/s");
+        return "MAF: " + String(maf) + " g/s";
     }
+    return "Unknown Data";
+}
+
+String CANHandler::getLabelForPID(byte pid) {
+    if (pidMap.find(pid) != pidMap.end()) {
+        return pidMap[pid];
+    }
+    return "Unknown PID";
 }
