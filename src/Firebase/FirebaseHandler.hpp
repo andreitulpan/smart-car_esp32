@@ -3,6 +3,7 @@
 
 #include <Firebase_ESP_Client.h>
 #include <FirebaseJson.h>
+#include <map>
 #include <Arduino.h>
 #include "FirebaseConfig.hpp"
 
@@ -10,7 +11,8 @@ class FirebaseHandler {
 public:
     FirebaseHandler(const String& apiKey, const String& userEmail, const String& userPassword, const String& databaseUrl);
     void begin();
-    void sendData(float temperature, float humidity, float pressure, unsigned long timestamp);
+    void addData(const String& key, const String& value); // Add key-value pair to the dictionary
+    void sendData(unsigned long timestamp);              // Send all data in the dictionary
 
 private:
     FirebaseData fbdo;
@@ -18,17 +20,11 @@ private:
     FirebaseConfig config;
     FirebaseJson json;
 
-    String uid;
     String databasePath;
-    String tempPath = "/temperature";
-    String humPath = "/humidity";
-    String presPath = "/pressure";
-    String timePath = "/timestamp";
-
     unsigned long sendDataPrevMillis = 0;
-    unsigned long timerDelay = 60000;
+    const unsigned long timerDelay = 5000; // Fixed interval (5 seconds)
 
-    void initializeFirebase();
+    std::map<String, String> dataMap; // Dictionary to store key-value pairs
 };
 
 #endif // FIREBASE_HANDLER_HPP

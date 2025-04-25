@@ -40,19 +40,31 @@ void FirebaseHandler::begin() {
     databasePath += "/readings";
 }
 
-void FirebaseHandler::sendData(float temperature, float humidity, float pressure, unsigned long timestamp) {
-    if (Firebase.ready() && (millis() - sendDataPrevMillis > timerDelay || sendDataPrevMillis == 0)) {
+void FirebaseHandler::addData(const String& key, const String& value) {
+    String formattedKey = "/" + key;
+    dataMap[formattedKey] = value; // Add or update the key-value pair in the dictionary
+}
+void FirebaseHandler::sendData(unsigned long timestamp) {
+    if (!dataMap.empty() && Firebase.ready() && (millis() - sendDataPrevMillis > timerDelay || sendDataPrevMillis == 0)) {
         sendDataPrevMillis = millis();
 
-        String parentPath = databasePath;
-        parentPath += "/";
-        parentPath += String(timestamp);
+        // Construct the full path with the timestamp
+        String fullPath = databasePath;
+        fullPath += "/";
+        fullPath += String(timestamp); // Add timestamp as part of the path
 
-        json.set(tempPath.c_str(), String(temperature));
-        json.set(humPath.c_str(), String(humidity));
-        json.set(presPath.c_str(), String(pressure));
-        json.set(timePath, String(timestamp));
+        // Set all key-value pairs in the JSON object
+        for (const auto& entry : dataMap) {
+            json.set(entry.first.c_str(), entry.second);
+        }
 
-        Serial.printf("Set json... %s\n", Firebase.RTDB.setJSON(&fbdo, parentPath.c_str(), &json) ? "ok" : fbdo.errorReason().c_str());
+        // Optionally include the timestamp in the data
+        json.set("/timestamp", String(timestamp));
+
+        // Send the JSON object to Firebase
+        Serial.printf("Set json... %s\n", Firebase.RTDB.setJSON(&fbdo, fullPath.c_str(), &json) ? "ok" : fbdo.errorReason().c_str());
+
+        // Clear the dictionary after sending the data
+        dataMap.clear();
     }
 }

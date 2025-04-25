@@ -84,23 +84,23 @@ void bleReceiveCallback(const std::string& message) {
     }
 }
 
-void sendMockFirebaseData()
-{
-    // Simulate sensor readings
-    float temp = random(1500, 3000) / 100.0;    // Simulate temperature between 15.00°C and 30.00°C
-    float humidity = random(3000, 8000) / 100.0; // Simulate humidity between 30.00% and 80.00%
-    float pressure = random(99000, 105000) / 100.0; // Simulate pressure between 990.00 and 1050.00 hPa
+// void sendMockFirebaseData()
+// {
+//     // Simulate sensor readings
+//     float temp = random(1500, 3000) / 100.0;    // Simulate temperature between 15.00°C and 30.00°C
+//     float humidity = random(3000, 8000) / 100.0; // Simulate humidity between 30.00% and 80.00%
+//     float pressure = random(99000, 105000) / 100.0; // Simulate pressure between 990.00 and 1050.00 hPa
 
-    // Get current timestamp
-    unsigned long timestamp = getTime();
-    if (timestamp == 0) {
-        Serial.println("Failed to obtain time");
-        return;
-    }
+//     // Get current timestamp
+//     unsigned long timestamp = getTime();
+//     if (timestamp == 0) {
+//         Serial.println("Failed to obtain time");
+//         return;
+//     }
 
-    // Send data to Firebase
-    firebaseHandler.sendData(temp, humidity, pressure, timestamp);
-}
+//     // Send data to Firebase
+//     firebaseHandler.sendData(temp, humidity, pressure, timestamp);
+// }
 
 void setup() {
     Serial.begin(115200);
@@ -120,8 +120,8 @@ void setup() {
     canHandler.addPID(0x0C, "RPM");
     canHandler.addPID(0x0D, "Speed");
     canHandler.addPID(0x10, "MAF");
-    canHandler.addPID(0x05, "Coolant Temp");
-    canHandler.addPID(0x5C, "Oil Temp");
+    canHandler.addPID(0x05, "Coolant_Temp");
+    canHandler.addPID(0x5C, "Oil_Temp");
 
     String ssid, password;
     eepromHandler.loadWiFiCredentials(ssid, password); // Load WiFi credentials from EEPROM
@@ -168,10 +168,10 @@ void loop() {
             firebaseStatus = true;
         }
 
-        // Send mock Firebase data
-        if (WiFi.status() == WL_CONNECTED) {
-            sendMockFirebaseData();
-        }
+        // // Send mock Firebase data
+        // if (WiFi.status() == WL_CONNECTED) {
+        //     sendMockFirebaseData();
+        // }
     }
 
     // Check if the boot button is pressed
@@ -212,6 +212,10 @@ void loop() {
     if (pid != 0xFF && rxBuf != nullptr) {
         String label = canHandler.getLabelForPID(pid);
         String humanReadable = canHandler.convertToHumanReadable(pid, rxBuf);
+        firebaseHandler.addData(label, humanReadable); // Add data to firebase
         Serial.println("Received Response: " + label + " -> " + humanReadable);
     }
+
+    // Send firebase messages
+    firebaseHandler.sendData(getTime());
 }

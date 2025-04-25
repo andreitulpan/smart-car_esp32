@@ -78,19 +78,19 @@ String CANHandler::convertToHumanReadable(byte pid, byte* rxBuf) {
     String label = pidMap[pid];
     if (label == "RPM") {
         value = ((rxBuf[3] * 256) + rxBuf[4]) / 4;
-        return "RPM: " + String(value);
+        return String(value);
     } else if (label == "Speed") {
         value = rxBuf[3];
-        return "Speed: " + String(value) + " km/h";
-    } else if (label == "Coolant Temp") {
+        return String(value);
+    } else if (label == "Coolant_Temp") {
         value = rxBuf[3] - 40;
-        return "Coolant Temp: " + String(value) + " °C";
-    } else if (label == "Oil Temp") {
+        return String(value);
+    } else if (label == "Oil_Temp") {
         value = rxBuf[3] - 40;
-        return "Oil Temp: " + String(value) + " °C";
+        return String(value);
     } else if (label == "MAF") {
         float maf = ((rxBuf[3] * 256) + rxBuf[4]) / 100.0;
-        return "MAF: " + String(maf) + " g/s";
+        return String(maf);
     }
     return "Unknown Data";
 }
