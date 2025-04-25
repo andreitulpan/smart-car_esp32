@@ -4,9 +4,12 @@
 #include "BLE/BLEHandler.hpp"
 #include "EEPROM/EEPROMHandler.hpp"
 #include "Firebase/FirebaseHandler.hpp"
+#include "CAN/CANHandler.hpp"
 
 #define BOOT_BUTTON_PIN 0 // GPIO pin for the boot button
 #define LED_PIN 2         // GPIO pin for the onboard LED
+
+#define CAN_CS 5 // Chip Select pin for MCP2515
 
 bool isBLEActive = false; // Tracks if BLE is active
 bool wifiStatus = false;
@@ -14,6 +17,9 @@ bool firebaseStatus = false;
 
 // NTP server
 const char* ntpServer = "pool.ntp.org";
+
+// CAN Handler
+CANHandler canHandler(CAN_CS);
 
 // OTAHandler otaHandler;
 BLEHandler bleHandler;
@@ -105,6 +111,11 @@ void setup() {
 
     eepromHandler.begin(); // Initialize EEPROM
 
+    // Initialize CAN
+    if (!canHandler.begin()) {
+        while (1); // Halt if CAN initialization fails
+    }
+
     String ssid, password;
     eepromHandler.loadWiFiCredentials(ssid, password); // Load WiFi credentials from EEPROM
     Serial.println("Loaded SSID: " + ssid);
@@ -131,6 +142,7 @@ void setup() {
 void loop() {
     static unsigned long buttonPressStartTime = 0;
     static unsigned long lastLEDToggleTime = 0;
+    static unsigned long lastCANRequestTime = 0;
     static bool ledState = false;
 
     if (WiFi.status() == WL_CONNECTED) {
@@ -184,4 +196,15 @@ void loop() {
 
     // Handle BLE communication
     bleHandler.handle();
+
+    // Handle CAN communication
+    if (millis() - lastCANRequestTime >= 3000 || lastCANRequestTime == 0) {
+        lastCANRequestTime = millis();
+
+        canHandler.requestAndReceive(0x0C, "RPM");          // Request Engine RPM
+        canHandler.requestAndReceive(0x0D, "Speed");        // Request Vehicle Speed
+        canHandler.requestAndReceive(0x10, "MAF");          // Request Mass Air Flow
+        canHandler.requestAndReceive(0x05, "Coolant Temp"); // Request Coolant Temperature
+        canHandler.requestAndReceive(0x5C, "Oil Temp");     // Request Oil Temperature
+    }
 }
