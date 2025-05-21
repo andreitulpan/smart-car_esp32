@@ -6,6 +6,7 @@
 #include <map>
 #include <Arduino.h>
 #include <tuple>
+#include <vector> // Add this include	
 
 class CANHandler {
 public:
@@ -13,7 +14,8 @@ public:
     bool begin();
     void addPID(byte pid, const String& label);
     void sendRequests();
-    std::tuple<byte, byte*> handleResponse(); // Returns PID and raw message
+    // std::tuple<byte, byte*> handleResponse(); // Returns PID and raw message
+    std::vector<std::tuple<String, String>> handleResponses(); // Returns list of (label, humanReadable)
     String convertToHumanReadable(byte pid, byte* rxBuf); // Converts raw data to human-readable
     String getLabelForPID(byte pid); // Returns the label for a given PID
 
@@ -26,9 +28,7 @@ private:
     std::map<byte, unsigned long> lastRequestTime; // Tracks the last request time for each PID
     std::map<byte, unsigned long> lastResponseTime; // Tracks the last response time for each PID
     std::map<byte, bool> responseReceived; // Tracks whether a response has been received for each PID
-
-    const unsigned long requestInterval = 5000; // 5 seconds between requests
-    const unsigned long responseThreshold = 30000; // 30 seconds threshold for missing responses
+    bool canInitialized = false; // Flag to check if CAN is initialized
 };
 
 #endif // CAN_HANDLER_HPP

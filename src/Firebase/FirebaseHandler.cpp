@@ -86,7 +86,7 @@ void FirebaseHandler::readData() {
 }
 
 void FirebaseHandler::sendData(unsigned long timestamp) {
-    if (!dataMap.empty() && Firebase.ready() && (millis() - sendDataPrevMillis > timerDelay || sendDataPrevMillis == 0)) {
+    if (!dataMap.empty() && Firebase.ready() && (millis() - sendDataPrevMillis > SettingsHandler::getCanRequestInterval() || sendDataPrevMillis == 0)) {
         sendDataPrevMillis = millis();
 
         // Construct the full path with the timestamp
@@ -95,8 +95,9 @@ void FirebaseHandler::sendData(unsigned long timestamp) {
         fullPath += String(timestamp); // Add timestamp as part of the path
 
         // Set all key-value pairs in the JSON object
-        for (const auto& entry : dataMap) {
-            json.set(entry.first.c_str(), entry.second);
+        for (auto it = dataMap.begin(); it != dataMap.end(); ) {
+            json.set(it->first.c_str(), it->second);
+            it = dataMap.erase(it); // erase returns the next iterator
         }
 
         // Optionally include the timestamp in the data
@@ -106,7 +107,7 @@ void FirebaseHandler::sendData(unsigned long timestamp) {
         LogHandler::writeMessage(LogHandler::DebugType::INFO, "Set json... " + String(Firebase.RTDB.setJSON(&fbdo, fullPath.c_str(), &json) ? "ok" : fbdo.errorReason().c_str()), false);
 
         // Clear the dictionary after sending the data
-        dataMap.clear();
+        // dataMap.clear();
     }
 }
 

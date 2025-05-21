@@ -1,14 +1,18 @@
 #include "CANHandler.hpp"
 
+#include "../LOG/LogHandler.hpp"
+#include "../SETTINGS/SettingsHandler.hpp"
+
 CANHandler::CANHandler(int csPin) : can(csPin) {}
 
 bool CANHandler::begin() {
     if (can.begin(MCP_ANY, CAN_500KBPS, MCP_8MHZ) == CAN_OK) {
-        Serial.println("MCP2515 Initialized Successfully!");
+        LogHandler::writeMessage(LogHandler::DebugType::CAN, String("MCP2515 Initialized Successfully!"));
         can.setMode(MCP_NORMAL);
+        canInitialized = true;
         return true;
     } else {
-        Serial.println("Error Initializing MCP2515...");
+        LogHandler::writeMessage(LogHandler::DebugType::CAN, String("Error Initializing MCP2515..."));
         return false;
     }
 }
@@ -21,38 +25,63 @@ void CANHandler::addPID(byte pid, const String& label) {
 }
 
 void CANHandler::sendRequests() {
+    if (!canInitialized) return;
+
     unsigned long currentTime = millis();
 
     for (const auto& entry : pidMap) {
         byte pid = entry.first;
 
         // Check if it's time to send a request for this PID
-        if (currentTime - lastRequestTime[pid] >= requestInterval && responseReceived[pid]) {
+        if (currentTime - lastRequestTime[pid] >= SettingsHandler::getCanRequestInterval() && responseReceived[pid]) {
             byte request[] = {0x02, 0x01, pid, 0x00, 0x00, 0x00, 0x00, 0x00};
             if (can.sendMsgBuf(obdRequestId, 0, 8, request) == CAN_OK) {
-                Serial.println("Request sent for PID: " + String(pid, HEX) + " (" + pidMap[pid] + ")");
+                LogHandler::writeMessage(LogHandler::DebugType::CAN, String("Request sent for PID: ") + String(pid, HEX) + " (" + pidMap[pid] + ")");
                 lastRequestTime[pid] = currentTime; // Update the last request time
                 responseReceived[pid] = false; // Mark as waiting for a response
             } else {
-                Serial.println("Error sending request for PID: " + String(pid, HEX));
+                // LogHandler::writeMessage(LogHandler::DebugType::CAN, String("Error sending request for PID: ") + String(pid, HEX)); // TODO: SHOULD BE RE_ENABLED
             }
         }
 
         // Check if the response threshold has been exceeded
-        if (!responseReceived[pid] && currentTime - lastResponseTime[pid] >= responseThreshold) {
-            Serial.println("No response received for PID: " + String(pid, HEX) + " (" + pidMap[pid] + ") within threshold time.");
+        if (!responseReceived[pid] && currentTime - lastResponseTime[pid] >= SettingsHandler::getCanResponseThreshold()) {
+            LogHandler::writeMessage(LogHandler::DebugType::CAN, String("No response received for PID: ") + String(pid, HEX) + " (" + pidMap[pid] + ") within threshold time.");
             responseReceived[pid] = true; // Allow sending the request again
         }
     }
 }
 
-std::tuple<byte, byte*> CANHandler::handleResponse() {
+// std::tuple<byte, byte*> CANHandler::handleResponse() {
+//     unsigned long rxId;
+//     byte len;
+//     static byte rxBuf[8]; // Static to persist after function returns
+
+//     // Check for incoming CAN messages
+//     if (can.checkReceive() == CAN_MSGAVAIL) {
+//         can.readMsgBuf(&rxId, &len, rxBuf);
+
+//         // Check if the message is a response from the ECU
+//         if (rxId == ecuResponseId && len >= 3 && rxBuf[1] == 0x41) {
+//             byte pid = rxBuf[2]; // Extract the PID from the response
+//             if (pidMap.find(pid) != pidMap.end()) {
+//                 // Update the last response time for the PID
+//                 lastResponseTime[pid] = millis();
+//                 responseReceived[pid] = true; // Mark as response received
+//                 return std::make_tuple(pid, rxBuf); // Return PID and raw message
+//             }
+//         }
+//     }
+//     return std::make_tuple(0xFF, nullptr); // Return invalid PID if no valid response
+// }
+
+std::vector<std::tuple<String, String>> CANHandler::handleResponses() {
     unsigned long rxId;
     byte len;
-    static byte rxBuf[8]; // Static to persist after function returns
+    static byte rxBuf[8];
+    std::vector<std::tuple<String, String>> results;
 
-    // Check for incoming CAN messages
-    if (can.checkReceive() == CAN_MSGAVAIL) {
+    while (can.checkReceive() == CAN_MSGAVAIL) {
         can.readMsgBuf(&rxId, &len, rxBuf);
 
         // Check if the message is a response from the ECU
@@ -62,11 +91,14 @@ std::tuple<byte, byte*> CANHandler::handleResponse() {
                 // Update the last response time for the PID
                 lastResponseTime[pid] = millis();
                 responseReceived[pid] = true; // Mark as response received
-                return std::make_tuple(pid, rxBuf); // Return PID and raw message
+
+                String pidLabel = getLabelForPID(pid);
+                String humanReadable = convertToHumanReadable(pid, rxBuf);
+                results.push_back(std::make_tuple(pidLabel, humanReadable));
             }
         }
     }
-    return std::make_tuple(0xFF, nullptr); // Return invalid PID if no valid response
+    return results;
 }
 
 String CANHandler::convertToHumanReadable(byte pid, byte* rxBuf) {
