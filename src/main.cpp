@@ -5,18 +5,25 @@
 #include "EEPROM/EEPROMHandler.hpp"
 #include "Firebase/FirebaseHandler.hpp"
 #include "CAN/CANHandler.hpp"
+#include "LOG/LogHandler.hpp"
+#include "SETTINGS/SettingsHandler.hpp"
 
 #define BOOT_BUTTON_PIN 0 // GPIO pin for the boot button
 #define LED_PIN 2         // GPIO pin for the onboard LED
 
 #define CAN_CS 5 // Chip Select pin for MCP2515
 
+const char* ntpServer = "pool.ntp.org"; // NTP server for time synchronization
+
 bool isBLEActive = false; // Tracks if BLE is active
 bool wifiStatus = false;
 bool firebaseStatus = false;
+bool canActive = false;
+static unsigned long lastCanTryToActive = 0;
 
-// NTP server
-const char* ntpServer = "pool.ntp.org";
+
+// Firebase handler instance
+FirebaseHandler firebaseHandler(API_KEY, USER_EMAIL, USER_PASSWORD, DATABASE_URL);
 
 // CAN Handler
 CANHandler canHandler(CAN_CS);
@@ -25,34 +32,19 @@ CANHandler canHandler(CAN_CS);
 BLEHandler bleHandler;
 EEPROMHandler eepromHandler(EEPROM_SIZE);
 
-// Firebase handler instance
-FirebaseHandler firebaseHandler(API_KEY, USER_EMAIL, USER_PASSWORD, DATABASE_URL);
-
-// Function to get the current epoch time
-unsigned long getTime() {
-    time_t now;
-    struct tm timeinfo;
-    if (!getLocalTime(&timeinfo)) {
-        return 0;
-    }
-    time(&now);
-    return now;
-}
-
 void bleReceiveCallback(const std::string& message) {
     if (!message.empty()) {
-        Serial.println("Processing command: " + String(message.c_str()));
+        LogHandler::writeMessage(LogHandler::LogHandler::DebugType::BLE, String("Received command: ") + String(message.c_str()));
 
         if (message == "CLEAR_EEPROM") {
             eepromHandler.clear();
-            Serial.println("EEPROM cleared via BLE.");
+            LogHandler::writeMessage(LogHandler::DebugType::BLE, String("EEPROM cleared."));
             bleHandler.sendMessage("EEPROM cleared.");
         } else if (message == "DISABLE_BLE") {
-            bleHandler.sendMessage("BLE disabling...");
+            LogHandler::writeMessage(LogHandler::DebugType::BLE, String("BLE disabled."));
             bleHandler.stopListening();
             isBLEActive = false;
             digitalWrite(LED_PIN, LOW);
-            Serial.println("BLE disabled.");
         } else if (message.rfind("WIFI,", 0) == 0) { // Check if message starts with "WIFI,"
             size_t firstComma = message.find(',');
             size_t secondComma = message.find(',', firstComma + 1);
@@ -63,7 +55,7 @@ void bleReceiveCallback(const std::string& message) {
                 
                 // Validate SSID and password length
                 if (ssid.length() < 1 || ssid.length() > 32 || password.length() < 1 || password.length() > 32) {
-                    Serial.println("Invalid SSID or Password length. Must be between 1 and 32 characters.");
+                    LogHandler::writeMessage(LogHandler::DebugType::INFO, String("Invalid SSID or Password length. Must be between 1 and 32 characters."));
                     bleHandler.sendMessage("Invalid SSID or Password length. Must be between 1 and 32 characters.");
                     return; // Exit the function if validation fails
                 }
@@ -74,33 +66,15 @@ void bleReceiveCallback(const std::string& message) {
                 WiFi.begin(ssid.c_str(), password.c_str());
                 wifiStatus = false; // Reset WiFi status
             } else {
-                Serial.println("Invalid WIFI command format.");
+                LogHandler::writeMessage(LogHandler::DebugType::INFO, String("Invalid WIFI command format."));
                 bleHandler.sendMessage("Invalid WIFI command format.");
             }
         } else {
-            Serial.println("Invalid command: " + String(message.c_str()));
+            LogHandler::writeMessage(LogHandler::DebugType::INFO, String("Invalid command: ") + String(message.c_str()));
             bleHandler.sendMessage("Invalid command.");
         }
     }
 }
-
-// void sendMockFirebaseData()
-// {
-//     // Simulate sensor readings
-//     float temp = random(1500, 3000) / 100.0;    // Simulate temperature between 15.00°C and 30.00°C
-//     float humidity = random(3000, 8000) / 100.0; // Simulate humidity between 30.00% and 80.00%
-//     float pressure = random(99000, 105000) / 100.0; // Simulate pressure between 990.00 and 1050.00 hPa
-
-//     // Get current timestamp
-//     unsigned long timestamp = getTime();
-//     if (timestamp == 0) {
-//         Serial.println("Failed to obtain time");
-//         return;
-//     }
-
-//     // Send data to Firebase
-//     firebaseHandler.sendData(temp, humidity, pressure, timestamp);
-// }
 
 void setup() {
     Serial.begin(115200);
@@ -111,10 +85,16 @@ void setup() {
 
     eepromHandler.begin(); // Initialize EEPROM
 
-    // Initialize CAN
-    if (!canHandler.begin()) {
-        Serial.println("CAN initialization failed!");
-    }
+    String ssid, password;
+    eepromHandler.loadWiFiCredentials(ssid, password);
+
+    // Connect to WiFi
+    WiFi.begin(ssid, password);
+
+    // Initialize OTA
+    // otaHandler.begin();
+
+    canActive = canHandler.begin(); // Initialize CAN handler
 
     // Add PIDs to the CAN handler
     canHandler.addPID(0x0C, "RPM");
@@ -123,26 +103,15 @@ void setup() {
     canHandler.addPID(0x05, "Coolant_Temp");
     canHandler.addPID(0x5C, "Oil_Temp");
 
-    String ssid, password;
-    eepromHandler.loadWiFiCredentials(ssid, password); // Load WiFi credentials from EEPROM
-    Serial.println("Loaded SSID: " + ssid);
-    Serial.println("Loaded Password: " + password);
-
-    // Connect to WiFi
-    WiFi.begin(ssid, password);
-
-    // Initialize OTA
-    // otaHandler.begin();
-
     // Initialize BLE
     bleHandler.begin("SMARTCAR_BLE");
     // bleHandler.startListening();
     bleHandler.setReceiveMessageCallback(bleReceiveCallback);
     bleHandler.setDeviceConnectedCallback([]() {
-        Serial.println("Device connected!");
+        LogHandler::writeMessage(LogHandler::DebugType::BLE, String("Device connected!"));
     });
     bleHandler.setDeviceDisconnectedCallback([]() {
-        Serial.println("Device disconnected!");
+        LogHandler::writeMessage(LogHandler::DebugType::BLE, String("Device disconnected!"));
     });
 }
 
@@ -155,23 +124,32 @@ void loop() {
     if (WiFi.status() == WL_CONNECTED) {
         if (!wifiStatus) {
             wifiStatus = true;
-            Serial.println("\nConnected to WiFi network " + String(WiFi.SSID()));
-            Serial.println("IP Address: " + WiFi.localIP().toString());
+            LogHandler::writeMessage(LogHandler::DebugType::INFO, String("WiFi connected: ") + WiFi.SSID() + ", IP: " + WiFi.localIP().toString());
             bleHandler.sendMessage(std::string("WiFi connected: ") + WiFi.SSID().c_str() + ", IP: " + WiFi.localIP().toString().c_str());
             
             // Configure time
             configTime(0, 0, ntpServer);
+            struct tm timeinfo;
+            while (!getLocalTime(&timeinfo) || timeinfo.tm_year < (2020 - 1900)) {
+                LogHandler::writeMessage(LogHandler::DebugType::INFO, "Waiting for NTP time sync...", false);
+                delay(1000);
+            }
+            LogHandler::writeMessage(LogHandler::DebugType::INFO, "NTP time set! Year: " + String(timeinfo.tm_year + 1900), false);
+            LogHandler::writeMessage(LogHandler::DebugType::INFO, "Epoch time: " + String(LogHandler::getTime()), false);
+
         }
 
         if (!firebaseStatus) {
             firebaseHandler.begin();
             firebaseStatus = true;
         }
+    }
 
-        // // Send mock Firebase data
-        // if (WiFi.status() == WL_CONNECTED) {
-        //     sendMockFirebaseData();
-        // }
+    if (!canActive) {
+        if (millis() - lastCanTryToActive >= 5000) { // Try to activate CAN every 5 seconds
+            canHandler.begin();
+            lastCanTryToActive = millis();
+        }
     }
 
     // Check if the boot button is pressed
@@ -180,7 +158,7 @@ void loop() {
             buttonPressStartTime = millis(); // Start timing the button press
         } else if (millis() - buttonPressStartTime >= 3000) { // Button held for 3 seconds
             if (!isBLEActive) {
-                Serial.println("Starting BLE...");
+                LogHandler::writeMessage(LogHandler::DebugType::BLE, String("Starting BLE..."));
                 bleHandler.startListening();
                 isBLEActive = true; // Enable BLE
             }
@@ -207,15 +185,33 @@ void loop() {
     // Send CAN requests every 5 seconds
     canHandler.sendRequests();
 
-    // Handle incoming CAN responses
-    auto [pid, rxBuf] = canHandler.handleResponse();
-    if (pid != 0xFF && rxBuf != nullptr) {
-        String label = canHandler.getLabelForPID(pid);
-        String humanReadable = canHandler.convertToHumanReadable(pid, rxBuf);
-        firebaseHandler.addData(label, humanReadable); // Add data to firebase
-        Serial.println("Received Response: " + label + " -> " + humanReadable);
+    // // Handle incoming CAN responses
+    // auto [pid, rxBuf] = canHandler.handleResponse();
+    // if (pid != 0xFF && rxBuf != nullptr) {
+    //     String label = canHandler.getLabelForPID(pid);
+    //     String humanReadable = canHandler.convertToHumanReadable(pid, rxBuf);
+    //     firebaseHandler.addData(label, humanReadable); // Add data to firebase
+    //     LogHandler::writeMessage(LogHandler::DebugType::CAN, String("Received Response: ") + label + " -> " + humanReadable, false);
+    // }
+
+    static unsigned long lastCANReadTime = 0;
+    const unsigned long canReadInterval = 50; // ms
+
+    if (millis() - lastCANReadTime >= canReadInterval) {
+        lastCANReadTime = millis();
+        auto responses = canHandler.handleResponses();
+        for (const auto& [label, value] : responses) {
+            firebaseHandler.addData(label, value);
+            LogHandler::writeMessage(LogHandler::DebugType::CAN, String("Received Response: ") + label + " -> " + value);
+        }
     }
 
     // Send firebase messages
-    firebaseHandler.sendData(getTime());
+    firebaseHandler.sendData(LogHandler::getTime());
+
+    // Receive firebase messages
+    firebaseHandler.readData();
+
+    // Send queued log messages
+    firebaseHandler.sendQueuedLogMessages();
 }

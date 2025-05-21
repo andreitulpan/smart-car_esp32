@@ -1,4 +1,5 @@
 #include "EEPROMHandler.hpp"
+#include "../LOG/LogHandler.hpp"
 
 EEPROMHandler::EEPROMHandler(size_t size) : _size(size) {}
 
@@ -33,11 +34,15 @@ void EEPROMHandler::clear() {
 void EEPROMHandler::saveWiFiCredentials(const String& ssid, const String& password) {
     saveString(SSID_ADDRESS, ssid);
     saveString(PASSWORD_ADDRESS, password);
-    Serial.println("WiFi credentials saved to EEPROM.");
+    LogHandler::writeMessage(LogHandler::DebugType::INFO, String("Saving WiFi credentials to EEPROM: ") + ssid + ", " + password);
 }
 
 void EEPROMHandler::loadWiFiCredentials(String& ssid, String& password) {
     ssid = loadString(SSID_ADDRESS, SSID_SIZE); // Load SSID (max 32 characters)
     password = loadString(PASSWORD_ADDRESS, PASSWORD_SIZE); // Load password (max 32 characters)
-    Serial.println("WiFi credentials loaded from EEPROM.");
+    if (ssid.length() > 0 && password.length() > 0) {
+        LogHandler::writeMessage(LogHandler::DebugType::INFO, String("Loaded WiFi credentials from EEPROM: ") + ssid + ", " + password);
+    } else {
+        LogHandler::writeMessage(LogHandler::DebugType::INFO, String("No WiFi credentials found in EEPROM."));
+    }
 }
