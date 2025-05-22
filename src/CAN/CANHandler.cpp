@@ -19,86 +19,80 @@ bool CANHandler::begin() {
 
 void CANHandler::addPID(byte pid, const String& label) {
     pidMap[pid] = label;
-    lastRequestTime[pid] = 0; // Initialize the last request time for the PID
-    lastResponseTime[pid] = 0; // Initialize the last response time for the PID
-    responseReceived[pid] = true; // Assume a response has been received initially
+    // lastRequestTime[pid] = 0; // Initialize the last request time for the PID
+    // lastResponseTime[pid] = 0; // Initialize the last response time for the PID
+    // responseReceived[pid] = true; // Assume a response has been received initially
 }
 
 void CANHandler::sendRequests() {
-    if (!canInitialized) return;
+    if (!canInitialized || pidMap.empty()) return;
 
     unsigned long currentTime = millis();
+    unsigned long interval = SettingsHandler::getCanRequestInterval();
+    unsigned long timeout = SettingsHandler::getCanResponseThreshold();
 
-    for (const auto& entry : pidMap) {
-        byte pid = entry.first;
-
-        // Check if it's time to send a request for this PID
-        if (currentTime - lastRequestTime[pid] >= SettingsHandler::getCanRequestInterval() && responseReceived[pid]) {
-            byte request[] = {0x02, 0x01, pid, 0x00, 0x00, 0x00, 0x00, 0x00};
+    // If not waiting for a response, and enough time has passed since last response, send next PID
+    if (!waitingForResponse && (currentTime - lastResponseTime >= interval)) {
+        // If queue is empty, refill it
+        // if (pidQueue.empty()) {
+        //     for (const auto& entry : pidMap) {
+        //         pidQueue.push(entry.first);
+        //     }
+        // }
+        if (!pidQueue.empty()) {
+            currentPid = pidQueue.front();
+            pidQueue.pop();
+            byte request[] = {0x02, 0x01, currentPid, 0x00, 0x00, 0x00, 0x00, 0x00};
             if (can.sendMsgBuf(obdRequestId, 0, 8, request) == CAN_OK) {
-                LogHandler::writeMessage(LogHandler::DebugType::CAN, String("Request sent for PID: ") + String(pid, HEX) + " (" + pidMap[pid] + ")");
-                lastRequestTime[pid] = currentTime; // Update the last request time
-                responseReceived[pid] = false; // Mark as waiting for a response
+                LogHandler::writeMessage(LogHandler::DebugType::CAN, String("Request sent for PID: ") + String(currentPid, HEX) + " (" + pidMap[currentPid] + ")");
+                waitingForResponse = true;
+                lastRequestTime = currentTime;
             } else {
-                // LogHandler::writeMessage(LogHandler::DebugType::CAN, String("Error sending request for PID: ") + String(pid, HEX)); // TODO: SHOULD BE RE_ENABLED
+                LogHandler::writeMessage(LogHandler::DebugType::CAN, String("Error sending request for PID: ") + String(currentPid, HEX));
+                waitingForResponse = false;
+                lastResponseTime = currentTime; // Skip to next PID after error
             }
         }
-
-        // Check if the response threshold has been exceeded
-        if (!responseReceived[pid] && currentTime - lastResponseTime[pid] >= SettingsHandler::getCanResponseThreshold()) {
-            LogHandler::writeMessage(LogHandler::DebugType::CAN, String("No response received for PID: ") + String(pid, HEX) + " (" + pidMap[pid] + ") within threshold time.");
-            responseReceived[pid] = true; // Allow sending the request again
-        }
+    }
+    // Timeout: if waiting for response and too much time has passed, skip to next PID
+    if (waitingForResponse && (currentTime - lastRequestTime >= timeout)) {
+        LogHandler::writeMessage(LogHandler::DebugType::CAN, String("Timeout waiting for response for PID: ") + String(currentPid, HEX));
+        waitingForResponse = false;
+        lastResponseTime = currentTime;
     }
 }
 
-// std::tuple<byte, byte*> CANHandler::handleResponse() {
-//     unsigned long rxId;
-//     byte len;
-//     static byte rxBuf[8]; // Static to persist after function returns
-
-//     // Check for incoming CAN messages
-//     if (can.checkReceive() == CAN_MSGAVAIL) {
-//         can.readMsgBuf(&rxId, &len, rxBuf);
-
-//         // Check if the message is a response from the ECU
-//         if (rxId == ecuResponseId && len >= 3 && rxBuf[1] == 0x41) {
-//             byte pid = rxBuf[2]; // Extract the PID from the response
-//             if (pidMap.find(pid) != pidMap.end()) {
-//                 // Update the last response time for the PID
-//                 lastResponseTime[pid] = millis();
-//                 responseReceived[pid] = true; // Mark as response received
-//                 return std::make_tuple(pid, rxBuf); // Return PID and raw message
-//             }
-//         }
-//     }
-//     return std::make_tuple(0xFF, nullptr); // Return invalid PID if no valid response
-// }
-
-std::vector<std::tuple<String, String>> CANHandler::handleResponses() {
+bool CANHandler::handleResponses(std::vector<CANResponse>& results) {
     unsigned long rxId;
     byte len;
     static byte rxBuf[8];
-    std::vector<std::tuple<String, String>> results;
-
     while (can.checkReceive() == CAN_MSGAVAIL) {
         can.readMsgBuf(&rxId, &len, rxBuf);
-
-        // Check if the message is a response from the ECU
         if (rxId == ecuResponseId && len >= 3 && rxBuf[1] == 0x41) {
-            byte pid = rxBuf[2]; // Extract the PID from the response
+            byte pid = rxBuf[2];
             if (pidMap.find(pid) != pidMap.end()) {
-                // Update the last response time for the PID
-                lastResponseTime[pid] = millis();
-                responseReceived[pid] = true; // Mark as response received
-
+                if (waitingForResponse && pid == currentPid) {
+                    waitingForResponse = false;
+                    lastResponseTime = millis();
+                }
                 String pidLabel = getLabelForPID(pid);
                 String humanReadable = convertToHumanReadable(pid, rxBuf);
-                results.push_back(std::make_tuple(pidLabel, humanReadable));
+                LogHandler::writeMessage(LogHandler::DebugType::CAN, String("Received Response: ") + pidLabel + " -> " + humanReadable, false);
+                results.push_back({pidLabel, humanReadable});
+                break;
             }
         }
     }
-    return results;
+
+    if (pidQueue.empty() && !waitingForResponse) {
+        // If the queue is empty and not waiting for a response, refill the queue
+        for (const auto& entry : pidMap) {
+            pidQueue.push(entry.first);
+        }
+        return true;
+    }
+
+    return false;
 }
 
 String CANHandler::convertToHumanReadable(byte pid, byte* rxBuf) {

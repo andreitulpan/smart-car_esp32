@@ -24,7 +24,7 @@ void LogHandler::writeMessage(LogHandler::DebugType type, const String& message,
         default: typeStr = "INFO"; break;
     }
     if (sendToFirebase) {
-        logQueue.push({typeStr, String(getTime()), message});
+        // logQueue.push({typeStr, String(getTime()), message});
     }
     Serial.println("[" + typeStr + "] " + message);
 }

@@ -6,8 +6,12 @@
 #include <map>
 #include <Arduino.h>
 #include <queue>
+#include <vector>
+
 #include "FirebaseConfig.hpp"
 #include "../SETTINGS/SettingsHandler.hpp"
+#include "../LOG/LogHandler.hpp"
+#include "../UTILS/CANResponse.hpp"
 
 struct LogEntry {
     String path;
@@ -19,7 +23,8 @@ public:
     FirebaseHandler(const String& apiKey, const String& userEmail, const String& userPassword, const String& databaseUrl);
     void begin();
     void addData(const String& key, const String& value); // Add key-value pair to the dictionary
-    void sendData(unsigned long timestamp);              // Send all data in the dictionary
+    void addData(std::vector<CANResponse>& results);
+    bool sendData(bool dataWasReceived, unsigned long timestamp);              // Send all data in the dictionary
     static void streamCallback(FirebaseStream data);
     static void streamTimeoutCallback(bool timeout);
     void readData();

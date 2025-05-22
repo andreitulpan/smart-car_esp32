@@ -81,12 +81,19 @@ void FirebaseHandler::addData(const String& key, const String& value) {
     dataMap[formattedKey] = value;
 }
 
+void FirebaseHandler::addData(std::vector<CANResponse>& results) {
+    for (const auto& response : results) {
+        String formattedKey = "/" + response.PID;
+        dataMap[formattedKey] = response.Value;
+    }
+}
+
 void FirebaseHandler::readData() {
     Firebase.RTDB.readStream(&stream);
 }
 
-void FirebaseHandler::sendData(unsigned long timestamp) {
-    if (!dataMap.empty() && Firebase.ready() && (millis() - sendDataPrevMillis > SettingsHandler::getCanRequestInterval() || sendDataPrevMillis == 0)) {
+bool FirebaseHandler::sendData(bool dataWasReceived, unsigned long timestamp) {
+    if (dataWasReceived && !dataMap.empty() && Firebase.ready() && (millis() - sendDataPrevMillis > SettingsHandler::getCanRequestInterval() || sendDataPrevMillis == 0)) {
         sendDataPrevMillis = millis();
 
         // Construct the full path with the timestamp
@@ -97,7 +104,7 @@ void FirebaseHandler::sendData(unsigned long timestamp) {
         // Set all key-value pairs in the JSON object
         for (auto it = dataMap.begin(); it != dataMap.end(); ) {
             json.set(it->first.c_str(), it->second);
-            it = dataMap.erase(it); // erase returns the next iterator
+            it = dataMap.erase(it);
         }
 
         // Optionally include the timestamp in the data
@@ -108,7 +115,9 @@ void FirebaseHandler::sendData(unsigned long timestamp) {
 
         // Clear the dictionary after sending the data
         // dataMap.clear();
+        return true;
     }
+    return false;
 }
 
 void FirebaseHandler::sendQueuedLogMessages() {

@@ -7,6 +7,7 @@
 #include "CAN/CANHandler.hpp"
 #include "LOG/LogHandler.hpp"
 #include "SETTINGS/SettingsHandler.hpp"
+#include "UTILS/CANResponse.hpp"
 
 #define BOOT_BUTTON_PIN 0 // GPIO pin for the boot button
 #define LED_PIN 2         // GPIO pin for the onboard LED
@@ -21,6 +22,7 @@ bool firebaseStatus = false;
 bool canActive = false;
 static unsigned long lastCanTryToActive = 0;
 
+static bool receivedDataOverCan = false;
 
 // Firebase handler instance
 FirebaseHandler firebaseHandler(API_KEY, USER_EMAIL, USER_PASSWORD, DATABASE_URL);
@@ -31,6 +33,8 @@ CANHandler canHandler(CAN_CS);
 // OTAHandler otaHandler;
 BLEHandler bleHandler;
 EEPROMHandler eepromHandler(EEPROM_SIZE);
+
+std::vector<CANResponse> canResponses;
 
 void bleReceiveCallback(const std::string& message) {
     if (!message.empty()) {
@@ -199,15 +203,13 @@ void loop() {
 
     if (millis() - lastCANReadTime >= canReadInterval) {
         lastCANReadTime = millis();
-        auto responses = canHandler.handleResponses();
-        for (const auto& [label, value] : responses) {
-            firebaseHandler.addData(label, value);
-            LogHandler::writeMessage(LogHandler::DebugType::CAN, String("Received Response: ") + label + " -> " + value);
+        if (canHandler.handleResponses(canResponses)) {
+            firebaseHandler.addData(canResponses);
         }
     }
 
     // Send firebase messages
-    firebaseHandler.sendData(LogHandler::getTime());
+    receivedDataOverCan = !(firebaseHandler.sendData(receivedDataOverCan, LogHandler::getTime()));
 
     // Receive firebase messages
     firebaseHandler.readData();
