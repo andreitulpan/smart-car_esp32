@@ -1,5 +1,7 @@
 #include "LogHandler.hpp"
 
+#include "../SETTINGS/SettingsHandler.hpp"
+
 std::queue<LogHandler::LogEntry> LogHandler::logQueue;
 
 unsigned long LogHandler::getTime() {
@@ -23,10 +25,20 @@ void LogHandler::writeMessage(LogHandler::DebugType type, const String& message,
         case DebugType::CAN: typeStr = "CAN"; break;
         default: typeStr = "INFO"; break;
     }
-    if (sendToFirebase) {
-        // logQueue.push({typeStr, String(getTime()), message});
+    if (sendToFirebase && SettingsHandler::getEnableLogs()) {
+        logQueue.push({typeStr, String(getTime()), message});
     }
-    Serial.println("[" + typeStr + "] " + message);
+    // Print timestamp in human-readable format
+    char timeStr[32] = {0};
+    time_t now = getTime();
+    if (now != 0) {
+        struct tm timeinfo;
+        localtime_r(&now, &timeinfo);
+        strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
+        Serial.println("[" + typeStr + "] [" + String(timeStr) + "] " + message);
+    } else {
+        Serial.println("[" + typeStr + "] [NO TIME] " + message);
+    }
 }
 
 std::vector<LogHandler::LogEntry> LogHandler::getAndClearLogs() {

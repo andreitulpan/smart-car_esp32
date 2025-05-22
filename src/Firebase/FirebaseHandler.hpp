@@ -29,6 +29,7 @@ public:
     static void streamTimeoutCallback(bool timeout);
     void readData();
     void sendQueuedLogMessages();
+    bool setJSONWithRetry(FirebaseData* fbdo, const String& path, FirebaseJson* json, int maxRetries, int delayMs);
 
 private:
     static FirebaseHandler* instance;

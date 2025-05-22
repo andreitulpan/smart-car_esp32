@@ -186,17 +186,8 @@ void loop() {
     // Handle BLE communication
     bleHandler.handle();
 
-    // Send CAN requests every 5 seconds
+    // Send CAN requests every X seconds
     canHandler.sendRequests();
-
-    // // Handle incoming CAN responses
-    // auto [pid, rxBuf] = canHandler.handleResponse();
-    // if (pid != 0xFF && rxBuf != nullptr) {
-    //     String label = canHandler.getLabelForPID(pid);
-    //     String humanReadable = canHandler.convertToHumanReadable(pid, rxBuf);
-    //     firebaseHandler.addData(label, humanReadable); // Add data to firebase
-    //     LogHandler::writeMessage(LogHandler::DebugType::CAN, String("Received Response: ") + label + " -> " + humanReadable, false);
-    // }
 
     static unsigned long lastCANReadTime = 0;
     const unsigned long canReadInterval = 50; // ms

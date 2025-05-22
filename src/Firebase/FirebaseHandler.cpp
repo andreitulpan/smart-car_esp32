@@ -60,13 +60,21 @@ void FirebaseHandler::streamCallback(FirebaseStream data) {
             if (json->get(result, "CAN_RESPONSE_THRESHOLD") && result.typeNum == FirebaseJson::JSON_INT) {
                SettingsHandler::setCanResponseThreshold(result.intValue);
             }
-            LogHandler::writeMessage(LogHandler::DebugType::INFO, "CAN_REQUEST_INTERVAL: " + String(SettingsHandler::getCanRequestInterval()) + ", CAN_RESPONSE_THRESHOLD: " + String(SettingsHandler::getCanResponseThreshold()));
+            if (json->get(result, "ENABLE_LOGS") && result.typeNum == FirebaseJson::JSON_BOOL) {
+                SettingsHandler::setEnableLogs(result.boolValue);
+            }
+            LogHandler::writeMessage(LogHandler::DebugType::INFO, "CAN_REQUEST_INTERVAL: " + String(SettingsHandler::getCanRequestInterval()) + ", CAN_RESPONSE_THRESHOLD: " + String(SettingsHandler::getCanResponseThreshold()) + ", ENABLE_LOGS: " + String(SettingsHandler::getEnableLogs()));
         } else if (data.dataPath() == "/CAN_REQUEST_INTERVAL") {
             SettingsHandler::setCanRequestInterval(data.intData());
             LogHandler::writeMessage(LogHandler::DebugType::INFO, "CAN_REQUEST_INTERVAL updated: " + String(SettingsHandler::getCanRequestInterval()));
         } else if (data.dataPath() == "/CAN_RESPONSE_THRESHOLD") {
             SettingsHandler::setCanResponseThreshold(data.intData());
             LogHandler::writeMessage(LogHandler::DebugType::INFO, "CAN_RESPONSE_THRESHOLD updated: " + String(SettingsHandler::getCanResponseThreshold()));
+        } else if (data.dataPath() == "/ENABLE_LOGS") {
+            SettingsHandler::setEnableLogs(data.boolData());
+            LogHandler::writeMessage(LogHandler::DebugType::INFO, "ENABLE_LOGS updated: " + String(SettingsHandler::getEnableLogs()));
+        } else {
+            LogHandler::writeMessage(LogHandler::DebugType::INFO, "Stream data received: " + data.dataPath() + " -> " + data.stringData());
         }
     }
 }
@@ -92,6 +100,21 @@ void FirebaseHandler::readData() {
     Firebase.RTDB.readStream(&stream);
 }
 
+bool FirebaseHandler::setJSONWithRetry(FirebaseData* fbdo, const String& path, FirebaseJson* json, int maxRetries, int delayMs) {
+    int attempt = 0;
+    bool success = false;
+    while (attempt < maxRetries && !success) {
+        success = Firebase.RTDB.setJSON(fbdo, path.c_str(), json);
+        if (!success) {
+            String msg = "Set json failed (attempt " + String(attempt + 1) + "): " + fbdo->errorReason();
+            LogHandler::writeMessage(LogHandler::DebugType::INFO, msg);
+            delay(delayMs);
+        }
+        attempt++;
+    }
+    return success;
+}
+
 bool FirebaseHandler::sendData(bool dataWasReceived, unsigned long timestamp) {
     if (dataWasReceived && !dataMap.empty() && Firebase.ready() && (millis() - sendDataPrevMillis > SettingsHandler::getCanRequestInterval() || sendDataPrevMillis == 0)) {
         sendDataPrevMillis = millis();
@@ -111,10 +134,8 @@ bool FirebaseHandler::sendData(bool dataWasReceived, unsigned long timestamp) {
         json.set("/timestamp", String(timestamp));
 
         // Send the JSON object to Firebase
-        LogHandler::writeMessage(LogHandler::DebugType::INFO, "Set json... " + String(Firebase.RTDB.setJSON(&fbdo, fullPath.c_str(), &json) ? "ok" : fbdo.errorReason().c_str()), false);
+        setJSONWithRetry(&fbdo, fullPath, &json, 3, 100);
 
-        // Clear the dictionary after sending the data
-        // dataMap.clear();
         return true;
     }
     return false;
