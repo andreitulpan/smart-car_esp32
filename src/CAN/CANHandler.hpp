@@ -28,16 +28,13 @@ private:
     const unsigned long ecuResponseId = 0x7E8; // Standard response ID from ECU
 
     std::map<byte, String> pidMap; // Dictionary to store PID and label
-    // std::map<byte, unsigned long> lastRequestTime; // Tracks the last request time for each PID
-    // std::map<byte, unsigned long> lastResponseTime; // Tracks the last response time for each PID
-    // std::map<byte, bool> responseReceived; // Tracks whether a response has been received for each PID
-    // unsigned long lastRequestTime = 0; // Tracks the last request time for all PIDs
 
     std::queue<byte> pidQueue;
     byte currentPid = 0;
     bool waitingForResponse = false;
     unsigned long lastResponseTime = 0;
     unsigned long lastRequestTime = 0;
+    unsigned long lastIterationTime = 0;
 
     bool canInitialized = false; // Flag to check if CAN is initialized
 };

@@ -19,26 +19,15 @@ bool CANHandler::begin() {
 
 void CANHandler::addPID(byte pid, const String& label) {
     pidMap[pid] = label;
-    // lastRequestTime[pid] = 0; // Initialize the last request time for the PID
-    // lastResponseTime[pid] = 0; // Initialize the last response time for the PID
-    // responseReceived[pid] = true; // Assume a response has been received initially
 }
 
 void CANHandler::sendRequests() {
     if (!canInitialized || pidMap.empty()) return;
 
     unsigned long currentTime = millis();
-    unsigned long interval = SettingsHandler::getCanRequestInterval();
-    unsigned long timeout = SettingsHandler::getCanResponseThreshold();
 
     // If not waiting for a response, and enough time has passed since last response, send next PID
-    if (!waitingForResponse && (currentTime - lastResponseTime >= interval)) {
-        // If queue is empty, refill it
-        // if (pidQueue.empty()) {
-        //     for (const auto& entry : pidMap) {
-        //         pidQueue.push(entry.first);
-        //     }
-        // }
+    if (!waitingForResponse && (currentTime - lastResponseTime >= 100) && (currentTime - lastIterationTime >= SettingsHandler::getCanRequestInterval())) {
         if (!pidQueue.empty()) {
             currentPid = pidQueue.front();
             pidQueue.pop();
@@ -55,7 +44,7 @@ void CANHandler::sendRequests() {
         }
     }
     // Timeout: if waiting for response and too much time has passed, skip to next PID
-    if (waitingForResponse && (currentTime - lastRequestTime >= timeout)) {
+    if (waitingForResponse && (currentTime - lastRequestTime >= SettingsHandler::getCanResponseThreshold())) {
         LogHandler::writeMessage(LogHandler::DebugType::CAN, String("Timeout waiting for response for PID: ") + String(currentPid, HEX));
         waitingForResponse = false;
         lastResponseTime = currentTime;
@@ -85,6 +74,7 @@ bool CANHandler::handleResponses(std::vector<CANResponse>& results) {
     }
 
     if (pidQueue.empty() && !waitingForResponse) {
+        lastIterationTime = millis();
         // If the queue is empty and not waiting for a response, refill the queue
         for (const auto& entry : pidMap) {
             pidQueue.push(entry.first);
