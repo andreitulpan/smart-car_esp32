@@ -5,7 +5,7 @@
 
 FirebaseHandler* FirebaseHandler::instance = nullptr;
 
-FirebaseHandler::FirebaseHandler(const String& apiKey, const String& userEmail, const String& userPassword, const String& databaseUrl) {
+FirebaseHandler::FirebaseHandler(const String& apiKey, const String& userEmail, const String& userPassword, const String& databaseUrl, std::map<byte, PIDConfig>& pidMapRef) : pidMap(pidMapRef) {
     config.api_key = apiKey;
     auth.user.email = userEmail;
     auth.user.password = userPassword;
@@ -46,11 +46,17 @@ void FirebaseHandler::begin() {
     String readingPath = userPath + "/outputs";
     Firebase.RTDB.beginStream(&stream, readingPath.c_str());
     Firebase.RTDB.setStreamCallback(&stream, streamCallback, streamTimeoutCallback);
+
+    // Fetch CAN PIDs
+    pidPath = userPath + "/config/sensors";
+    // Firebase.RTDB.beginStream(&stream2, pidPath.c_str());
+    // Firebase.RTDB.setStreamCallback(&stream2, streamCallback2, streamTimeoutCallback2);
+
     firebaseConfigured = true;
 }
 
 void FirebaseHandler::streamCallback(FirebaseStream data) {
-    if (instance) {
+    if (instance && instance->firebaseConfigured) {
         if (data.dataTypeEnum() == fb_esp_rtdb_data_type_json) {
             FirebaseJson* json = data.jsonObjectPtr();
             FirebaseJsonData result;
@@ -79,7 +85,20 @@ void FirebaseHandler::streamCallback(FirebaseStream data) {
     }
 }
 
+void FirebaseHandler::streamCallback2(FirebaseStream data)
+{
+    if (instance && instance->firebaseConfigured)
+    {
+        // instance->fetchCANPIDs();
+    }
+}
+
 void FirebaseHandler::streamTimeoutCallback(bool timeout) {
+    if (timeout)
+        LogHandler::writeMessage(LogHandler::DebugType::INFO, "Stream timeout, resuming...");
+}
+
+void FirebaseHandler::streamTimeoutCallback2(bool timeout) {
     if (timeout)
         LogHandler::writeMessage(LogHandler::DebugType::INFO, "Stream timeout, resuming...");
 }
@@ -98,6 +117,7 @@ void FirebaseHandler::addData(std::vector<CANResponse>& results) {
 
 void FirebaseHandler::readData() {
     Firebase.RTDB.readStream(&stream);
+    // Firebase.RTDB.readStream(&stream2);
 }
 
 bool FirebaseHandler::setJSONWithRetry(FirebaseData* fbdo, const String& path, FirebaseJson* json, int maxRetries, int delayMs) {
@@ -127,6 +147,7 @@ bool FirebaseHandler::sendData(bool dataWasReceived, unsigned long timestamp) {
         // Set all key-value pairs in the JSON object
         for (auto it = dataMap.begin(); it != dataMap.end(); ) {
             json.set(it->first.c_str(), it->second);
+            LogHandler::writeMessage(LogHandler::DebugType::INFO, "Adding data to JSON: " + it->first + " -> " + it->second, false);
             it = dataMap.erase(it);
         }
 
@@ -162,4 +183,58 @@ void FirebaseHandler::sendQueuedLogMessages() {
             LogHandler::writeMessage(LogHandler::DebugType::INFO, "Queued log message sent to Firebase: " + entry.message, false);
         }
     }
+}
+
+bool FirebaseHandler::fetchCANPIDs() {
+    if (!firebaseConfigured) return false;
+
+    if (Firebase.RTDB.getJSON(&fbdo, pidPath.c_str())) {
+        String raw = fbdo.payload().c_str();
+        // Serial.println("RAW JSON FROM FIREBASE:");
+        // Serial.println(raw);
+
+        FirebaseJsonArray arr;
+        arr.setJsonArrayData(raw);
+
+        pidMap.clear();
+        FirebaseJsonData result;
+        int maxSensors = 20;
+        int len = arr.size();
+        if (len > maxSensors) len = maxSensors;
+
+        for (int i = 0; i < len; ++i) {
+            FirebaseJson jsonObj;
+            arr.get(result, i);
+            if (!result.success) continue;
+            jsonObj.setJsonData(result.stringValue);
+
+            // Only add if enabled
+            if (!jsonObj.get(result, "enabled") || !result.boolValue) continue;
+
+            // Get PID as string, then convert to byte
+            if (!jsonObj.get(result, "pid")) continue;
+            String pidStr = result.stringValue;
+            byte pid = (byte)strtol(pidStr.c_str(), nullptr, 0); // Handles "0x.." or decimal
+
+            // Get label/id
+            String label = "";
+            if (jsonObj.get(result, "id")) label = result.stringValue;
+
+            // Get formula
+            String formula = "";
+            if (jsonObj.get(result, "formula")) formula = result.stringValue;
+
+            // Get unit
+            String unit = "";
+            if (jsonObj.get(result, "unit")) unit = result.stringValue;
+
+            pidMap[pid] = PIDConfig{label, formula, unit};
+        }
+
+        LogHandler::writeMessage(LogHandler::DebugType::INFO, "Fetched " + String(pidMap.size()) + " active CAN PIDs from Firebase config.");
+        return true;
+    } else {
+        LogHandler::writeMessage(LogHandler::DebugType::ERROR, "Failed to fetch CAN PID config from Firebase: " + fbdo.errorReason());
+    }
+    return false;
 }

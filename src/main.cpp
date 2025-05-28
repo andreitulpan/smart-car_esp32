@@ -8,6 +8,7 @@
 #include "LOG/LogHandler.hpp"
 #include "SETTINGS/SettingsHandler.hpp"
 #include "UTILS/CANResponse.hpp"
+#include "UTILS/PIDConfig.hpp"
 
 #define BOOT_BUTTON_PIN 0 // GPIO pin for the boot button
 #define LED_PIN 2         // GPIO pin for the onboard LED
@@ -24,11 +25,13 @@ static unsigned long lastCanTryToActive = 0;
 
 static bool receivedDataOverCan = false;
 
+std::map<byte, PIDConfig> pidMap;
+
 // Firebase handler instance
-FirebaseHandler firebaseHandler(API_KEY, USER_EMAIL, USER_PASSWORD, DATABASE_URL);
+FirebaseHandler firebaseHandler(API_KEY, USER_EMAIL, USER_PASSWORD, DATABASE_URL, pidMap);
 
 // CAN Handler
-CANHandler canHandler(CAN_CS);
+CANHandler canHandler(CAN_CS, pidMap);
 
 // OTAHandler otaHandler;
 BLEHandler bleHandler;
@@ -101,11 +104,11 @@ void setup() {
     canActive = canHandler.begin(); // Initialize CAN handler
 
     // Add PIDs to the CAN handler
-    canHandler.addPID(0x0C, "RPM");
-    canHandler.addPID(0x0D, "Speed");
-    canHandler.addPID(0x10, "MAF");
-    canHandler.addPID(0x05, "Coolant_Temp");
-    canHandler.addPID(0x5C, "Oil_Temp");
+    // canHandler.addPID(0x0C, "RPM");
+    // canHandler.addPID(0x0D, "Speed");
+    // canHandler.addPID(0x10, "MAF");
+    // canHandler.addPID(0x05, "Coolant_Temp");
+    // canHandler.addPID(0x5C, "Oil_Temp");
 
     // Initialize BLE
     bleHandler.begin("SMARTCAR_BLE");
@@ -146,6 +149,9 @@ void loop() {
         if (!firebaseStatus) {
             firebaseHandler.begin();
             firebaseStatus = true;
+
+            // Fetch PIDs
+            while (!firebaseHandler.fetchCANPIDs()) {};
         }
     }
 
