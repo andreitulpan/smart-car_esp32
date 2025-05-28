@@ -42,4 +42,5 @@ void SettingsHandler::save() {
 void SettingsHandler::reset() {
     canRequestInterval = DEFAULT_CAN_REQUEST_INTERVAL;
     canResponseThreshold = DEFAULT_CAN_RESPONSE_THRESHOLD;
+    enableLogs = DEFAULT_ENABLE_LOGS;
 }

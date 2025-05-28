@@ -66,7 +66,7 @@ void FirebaseHandler::streamCallback(FirebaseStream data) {
             if (json->get(result, "CAN_RESPONSE_THRESHOLD") && result.typeNum == FirebaseJson::JSON_INT) {
                SettingsHandler::setCanResponseThreshold(result.intValue);
             }
-            if (json->get(result, "ENABLE_LOGS") && result.typeNum == FirebaseJson::JSON_BOOL) {
+            if (json->get(result, "ENABLE_LOGS") && result.typeNum == FirebaseJson::JSON_INT) {
                 SettingsHandler::setEnableLogs(result.boolValue);
             }
             LogHandler::writeMessage(LogHandler::DebugType::INFO, "CAN_REQUEST_INTERVAL: " + String(SettingsHandler::getCanRequestInterval()) + ", CAN_RESPONSE_THRESHOLD: " + String(SettingsHandler::getCanResponseThreshold()) + ", ENABLE_LOGS: " + String(SettingsHandler::getEnableLogs()));
@@ -171,16 +171,39 @@ void FirebaseHandler::sendQueuedLogMessages() {
         }
         lastSendTime = now;
         std::vector<LogHandler::LogEntry> logEntries = LogHandler::getAndClearLogs();
-        for (auto entry : logEntries) { // Not const, makes a copy
-            if (entry.timestamp == "0") {
-                entry.timestamp = String(LogHandler::getTime() - 15); // Remove 15 for the messages when the internet wasn't available
+
+        // Group by path, then by timestamp
+        std::map<String, std::map<long, std::vector<LogHandler::LogEntry>>> groupedMessages;
+        for (auto& entry : logEntries) {
+            if (entry.timestamp <= 0) {
+                entry.timestamp = LogHandler::getTime() - ((millis() + entry.timestamp) / 1000);
             }
-            String queuedFullPath = logsPath + "/" + entry.path + "/" + String(entry.timestamp);
-            FirebaseJson json;
-            json.set("timestamp", String(entry.timestamp));
-            json.set("message", entry.message);
-            Firebase.RTDB.setJSON(&fbdo, queuedFullPath.c_str(), &json);
-            LogHandler::writeMessage(LogHandler::DebugType::INFO, "Queued log message sent to Firebase: " + entry.message, false);
+            // Assume entry has a .path member; if not, replace with your logic or a default path
+            String path = entry.path.isEmpty() ? "default" : entry.path;
+            groupedMessages[path][entry.timestamp].push_back(entry);
+        }
+
+        for (const auto& pathPair : groupedMessages) {
+            const String& path = pathPair.first;
+            const auto& timestampMap = pathPair.second;
+            for (const auto& tsPair : timestampMap) {
+                long timestamp = tsPair.first;
+                const std::vector<LogHandler::LogEntry>& entries = tsPair.second;
+
+                // Combine all messages for this timestamp into one string
+                String combinedMessage;
+                for (const auto& entry : entries) {
+                    if (!combinedMessage.isEmpty()) combinedMessage += "; ";
+                    combinedMessage += entry.message;
+                }
+
+                String queuedFullPath = logsPath + "/" + path + "/" + String(timestamp);
+                FirebaseJson json;
+                json.set("timestamp", String(timestamp));
+                json.set("message", combinedMessage);
+                Firebase.RTDB.setJSON(&fbdo, queuedFullPath.c_str(), &json);
+                LogHandler::writeMessage(LogHandler::DebugType::INFO, "Queued log message sent to Firebase: " + combinedMessage, false);
+            }
         }
     }
 }

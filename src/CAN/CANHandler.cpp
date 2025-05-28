@@ -98,19 +98,25 @@ String CANHandler::convertToHumanReadable(byte pid, byte* rxBuf) {
     formula.replace("B6", String(rxBuf[6]));
     formula.replace("B7", String(rxBuf[7]));
 
-    // Now, try to evaluate the formula (very basic, supports only +, -, *, /, parentheses)
-    // For safety, only allow numbers and operators
-    // Example: "((123 * 256) + 45) / 4"
+    // Also support A, B, C, D as aliases for B3, B4, B5, B6
+    formula.replace("A", String(rxBuf[3]));
+    formula.replace("B", String(rxBuf[4]));
+    formula.replace("C", String(rxBuf[5]));
+    formula.replace("D", String(rxBuf[6]));
+
     double result = 0.0;
     bool evalOk = false;
-    // Simple parser for the most common cases
-    // You can expand this for more complex expressions or use a library
 
-    // Example: ((B3 * 256) + B4) / 4
-    // After replacement: ((123 * 256) + 45) / 4
-
-    // Try to evaluate known patterns
-    if (formula.indexOf('*') != -1 && formula.indexOf('+') != -1 && formula.indexOf('/') != -1) {
+    // Support (B3 * 100) / 255 or (A * 100) / 255
+    if (formula.indexOf('*') != -1 && formula.indexOf('/') != -1 && formula.indexOf("100") != -1 && formula.indexOf("255") != -1) {
+        int a;
+        if (sscanf(formula.c_str(), "(%d * 100) / 255", &a) == 1) {
+            result = (a * 100.0) / 255.0;
+            evalOk = true;
+        }
+    }
+    // Existing patterns...
+    else if (formula.indexOf('*') != -1 && formula.indexOf('+') != -1 && formula.indexOf('/') != -1) {
         int a, b, c;
         if (sscanf(formula.c_str(), "((%d * 256) + %d) / %d", &a, &b, &c) == 3) {
             result = ((a * 256) + b) / (double)c;
@@ -147,12 +153,6 @@ String CANHandler::convertToHumanReadable(byte pid, byte* rxBuf) {
     }
 
     if (evalOk) {
-        // String out = String(result);
-        // if (!config.unit.isEmpty()) {
-        //     out += " ";
-        //     out += config.unit;
-        // }
-        // return out;
         return String(result);
     } else {
         return "Eval error: " + formula;

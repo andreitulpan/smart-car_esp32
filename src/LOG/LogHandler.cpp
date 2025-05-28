@@ -26,7 +26,12 @@ void LogHandler::writeMessage(LogHandler::DebugType type, const String& message,
         default: typeStr = "INFO"; break;
     }
     if (sendToFirebase && SettingsHandler::getEnableLogs()) {
-        logQueue.push({typeStr, String(getTime()), message});
+        long time = getTime();
+        if (time == 0)
+        {
+            time = -millis();
+        }
+        logQueue.push({typeStr, time, message});
     }
     // Print timestamp in human-readable format
     char timeStr[32] = {0};

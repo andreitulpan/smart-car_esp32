@@ -17,7 +17,7 @@ public:
 
     struct LogEntry {
         String path;
-        String timestamp;
+        long timestamp;
         String message;
     };
 
